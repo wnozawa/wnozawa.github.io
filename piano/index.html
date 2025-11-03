@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>ランダム短フレーズ練習アプリ｜Cメジャー／4分の4拍子</title>
   <!-- VexFlow v3 UMD（譜面描画用） -->
-  <script src="https://cdn.jsdelivr.net/npm/vexflow@3.0.9/build/vexflow-min.js"></script>
+  <script src="https://unpkg.com/vexflow@3.0.9/build/vexflow-min.js"></script>
   <style>
     :root {
       --bg: #0b0f14; --panel: #121a22; --ink: #eaf2ff; --sub: #a9b6c6; --accent:#3aa1ff;
@@ -108,59 +108,74 @@
   </main>
 
   <script>
+  // ===== Strict mode & basic error surface =====
+  'use strict';
+  window.addEventListener('error', function(e){
+    const div = document.getElementById('score');
+    if(div){
+      const pre = document.createElement('pre');
+      pre.textContent = 'エラー: ' + (e.error && e.error.stack ? e.error.stack : (e.message || e));
+      pre.style.color = '#ff9da4';
+      pre.style.whiteSpace = 'pre-wrap';
+      pre.style.padding = '8px';
+      pre.style.border = '1px solid #3a1a1a';
+      pre.style.background = '#190f0f';
+      pre.style.borderRadius = '8px';
+      div.innerHTML = '';
+      div.appendChild(pre);
+    }
+  });
+
   // ===== RNG（シード付き） =====
-  function mulberry32(a){return function(){var t=a+=0x6D2B79F5;t=Math.imul(t^t>>>15,t|1);t^=t+Math.imul(t^t>>>7,t|61);return ((t^t>>>14)>>>0)/4294967296}}
-  function pick(rng, arr){return arr[Math.floor(rng()*arr.length)]}
+  function mulberry32(a){return function(){var t=a+=0x6D2B79F5;t=Math.imul(t^t>>>15,t|1);t^=t+Math.imul(t^t>>>7,t|61);return ((t^t>>>14)>>>0)/4294967296}};
+  function pick(rng, arr){return arr[Math.floor(rng()*arr.length)];}
 
   // ===== 音域と度数（Cメジャーのみ） =====
   // VexFlow のキー指定は 'c/4' のように表記。
-  const SCALE = ['c','d','e','f','g','a','b'];
-  const RH_RANGES = {
+  var SCALE = ['c','d','e','f','g','a','b'];
+  var RH_RANGES = {
     1: {lo: {n:'c',o:4}, hi: {n:'g',o:5}},
     2: {lo: {n:'c',o:4}, hi: {n:'a',o:5}},
     3: {lo: {n:'b',o:3}, hi: {n:'b',o:5}},
     4: {lo: {n:'a',o:3}, hi: {n:'c',o:6}},
-    5: {lo: {n:'g',o:3}, hi: {n:'d',o:6}},
+    5: {lo: {n:'g',o:3}, hi: {n:'d',o:6}}
   };
-  const LH_RANGES = {
+  var LH_RANGES = {
     1: {lo: {n:'c',o:2}, hi: {n:'g',o:3}},
     2: {lo: {n:'b',o:1}, hi: {n:'a',o:3}},
     3: {lo: {n:'a',o:1}, hi: {n:'b',o:3}},
     4: {lo: {n:'g',o:1}, hi: {n:'c',o:4}},
-    5: {lo: {n:'f',o:1}, hi: {n:'d',o:4}},
+    5: {lo: {n:'f',o:1}, hi: {n:'d',o:4}}
   };
 
-  function noteToString(n, o){return `${n}/${o}`}
+  function noteToString(n, o){return n + '/' + o;}
   function within(range, n, o){
-    const rank = (o*7) + SCALE.indexOf(n);
-    const lo = (range.lo.o*7) + SCALE.indexOf(range.lo.n);
-    const hi = (range.hi.o*7) + SCALE.indexOf(range.hi.n);
+    var rank = (o*7) + SCALE.indexOf(n);
+    var lo = (range.lo.o*7) + SCALE.indexOf(range.lo.n);
+    var hi = (range.hi.o*7) + SCALE.indexOf(range.hi.n);
     return rank>=lo && rank<=hi;
   }
-
   function clampToRange(range, n, o){
     while(!within(range,n,o)){
-      const loRank=(range.lo.o*7)+SCALE.indexOf(range.lo.n);
-      const hiRank=(range.hi.o*7)+SCALE.indexOf(range.hi.n);
-      const r=(o*7)+SCALE.indexOf(n);
+      var loRank=(range.lo.o*7)+SCALE.indexOf(range.lo.n);
+      var hiRank=(range.hi.o*7)+SCALE.indexOf(range.hi.n);
+      var r=(o*7)+SCALE.indexOf(n);
       if(r<loRank){o++;} else if(r>hiRank){o--;}
     }
-    return {n,o};
+    return {n:n,o:o};
   }
 
   // ===== リズムパターン（各小節の合計4拍） =====
-  // dur: 'w','h','q','8'（全／2分／4分／8分）; dots: 0/1（付点）; rest: true/false; chord: 0..3（和音の音数-1）
   function patternsFor(diff, bias){
-    const P = [];
-    const Q = v=>({dur:'q',dots:0,rest:false,chord:0,vol:v});
-    const H = v=>({dur:'h',dots:0,rest:false,chord:0,vol:v});
-    const Hd= v=>({dur:'h',dots:1,rest:false,chord:0,vol:v}); // 付点2分=3拍
-    const W = v=>({dur:'w',dots:0,rest:false,chord:0,vol:v});
-    const E = v=>({dur:'8',dots:0,rest:false,chord:0,vol:v});
-    const RQ= v=>({dur:'q',dots:0,rest:true ,chord:0,vol:v});
-    const RH= v=>({dur:'h',dots:0,rest:true ,chord:0,vol:v});
+    var P = [];
+    function Q(v){return {dur:'q',dots:0,rest:false,chord:0,vol:v};}
+    function H(v){return {dur:'h',dots:0,rest:false,chord:0,vol:v};}
+    function Hd(v){return {dur:'h',dots:1,rest:false,chord:0,vol:v};}
+    function W(v){return {dur:'w',dots:0,rest:false,chord:0,vol:v};}
+    function E(v){return {dur:'8',dots:0,rest:false,chord:0,vol:v};}
+    function RQ(v){return {dur:'q',dots:0,rest:true ,chord:0,vol:v};}
+    function RH(v){return {dur:'h',dots:0,rest:true ,chord:0,vol:v};}
 
-    // Level 1: 4分中心
     P.push([Q(),Q(),Q(),Q()]);
     P.push([H(),Q(),Q()]);
     P.push([Q(),H(),Q()]);
@@ -172,50 +187,43 @@
       P.push([Q(),Hd()]);
       P.push([RQ(),H(),Q()]);
     }
-
     if(diff>=3){
       P.push([Q(),Q(),E(),E(),Q()]);
       P.push([E(),E(),Q(),Q(),Q()]);
       P.push([Q(),E(),E(),E(),E(),Q()]);
     }
-
     if(diff>=4){
       P.push([E(),E(),E(),E(),Q(),Q()]);
       P.push([Q(),Q(),RH(),Q()]);
     }
-
     if(diff>=5){
       P.push([E(),E(),E(),E(),E(),E(),Q(),Q()]);
-      P.push([Hd(),E(),E()]);// 3拍+1拍
+      P.push([Hd(),E(),E()]);
     }
 
-    // bias でチョイスを軽く誘導
-    if(bias==='quarters') return P.filter(x=>x.every(t=>t.dur==='q'||t.dur==='h'||t.dur==='w'||t.dots===1));
-    if(bias==='halves')   return P.filter(x=>x.some(t=>t.dur==='h'||t.dots===1));
-    if(bias==='eighths')  return P.filter(x=>x.some(t=>t.dur==='8'));
-    if(bias==='chords')   return P; // 和音は後で付与
+    if(bias==='quarters') return P.filter(function(x){return x.every(function(t){return t.dur==='q'||t.dur==='h'||t.dur==='w'||t.dots===1;});});
+    if(bias==='halves')   return P.filter(function(x){return x.some(function(t){return t.dur==='h'||t.dots===1;});});
+    if(bias==='eighths')  return P.filter(function(x){return x.some(function(t){return t.dur==='8';});});
     return P;
   }
 
-  // ===== フレーズ生成 =====
   function generatePhrase(opts){
-    const {mode, difficulty, bars, seed, bias} = opts;
-    const rng = seed? mulberry32(Number(seed)>>>0) : Math.random;
+    var mode = opts.mode, difficulty = opts.difficulty, bars = opts.bars, seed = opts.seed, bias = opts.bias;
+    var rng = seed? mulberry32(Number(seed)>>>0) : Math.random;
 
-    const VF = Vex.Flow;
-    const div = document.getElementById('score');
+    var VF = Vex.Flow;
+    var div = document.getElementById('score');
     div.innerHTML = '';
 
-    const renderer = new VF.Renderer(div, VF.Renderer.Backends.SVG);
-    const widthPerBar = 360; // 小節幅
-    const staveHeight  = (mode==='BOTH')? 200 : 120;
-    const width = Math.max(420, widthPerBar*bars + 40);
+    var renderer = new VF.Renderer(div, VF.Renderer.Backends.SVG);
+    var widthPerBar = 360;
+    var staveHeight  = (mode==='BOTH')? 200 : 120;
+    var width = Math.max(420, widthPerBar*bars + 40);
     renderer.resize(width, staveHeight);
-    const context = renderer.getContext();
+    var context = renderer.getContext();
 
-    // スタッフ作成
-    const treble = new VF.Stave(10, 20, width-20).addClef('treble').addTimeSignature('4/4');
-    let bass   = null;
+    var treble = new VF.Stave(10, 20, width-20).addClef('treble').addTimeSignature('4/4');
+    var bass = null;
     if(mode==='BOTH' || mode==='LH'){
       bass = new VF.Stave(10, (mode==='BOTH')? 120:20, width-20).addClef('bass').addTimeSignature('4/4');
     }
@@ -223,10 +231,9 @@
     if(mode==='BOTH'){
       treble.setContext(context).draw();
       bass.setContext(context).draw();
-      // 大括弧
-      const brace = new VF.StaveConnector(treble, bass).setType(VF.StaveConnector.type.BRACE);
-      const lineL = new VF.StaveConnector(treble, bass).setType(VF.StaveConnector.type.SINGLE_LEFT);
-      const lineR = new VF.StaveConnector(treble, bass).setType(VF.StaveConnector.type.SINGLE_RIGHT);
+      var brace = new VF.StaveConnector(treble, bass).setType(VF.StaveConnector.type.BRACE);
+      var lineL = new VF.StaveConnector(treble, bass).setType(VF.StaveConnector.type.SINGLE_LEFT);
+      var lineR = new VF.StaveConnector(treble, bass).setType(VF.StaveConnector.type.SINGLE_RIGHT);
       brace.setContext(context).draw();
       lineL.setContext(context).draw();
       lineR.setContext(context).draw();
@@ -235,100 +242,87 @@
       if(mode==='LH') bass.setContext(context).draw();
     }
 
-    // それぞれの手のパートを作る
-    const voices = [];
-
     function buildHand(hand){
-      const range = (hand==='RH')? RH_RANGES[difficulty] : LH_RANGES[difficulty];
-      const clef  = (hand==='RH')? 'treble':'bass';
-      const measures = [];
-      const patterns = patternsFor(difficulty, bias);
-      let last = {n:'c', o:(hand==='RH'?4:2)}; // 出発点
+      var range = (hand==='RH')? RH_RANGES[difficulty] : LH_RANGES[difficulty];
+      var clef  = (hand==='RH')? 'treble':'bass';
+      var measures = [];
+      var patterns = patternsFor(difficulty, bias);
+      var last = {n:'c', o:(hand==='RH'?4:2)};
 
-      for(let m=0;m<bars;m++){
-        const pat = pick(rng, patterns);
-        const notes = [];\n        const beams = [];\n        let eighthGroup = [];
+      for(var m=0;m<bars;m++){
+        var pat = pick(rng, patterns);
+        var notes = [];
+        var beams = [];
+        var eighthGroup = [];
 
-        pat.forEach((tok, idx)=>{
-          const makeKeys = ()=>{
-            // 音程の選び方：難易度でステップ幅を調整
-            const maxStep = (difficulty<=2)? 2 : (difficulty===3? 3 : (difficulty===4? 4 : 5));
-            let step = Math.floor(rng()*(maxStep*2+1)) - maxStep; // -max..+max
-            if(Math.abs(step)===0) step = (rng()<0.5? 1:-1); // 完全な停止を避ける
+        pat.forEach(function(tok, idx){
+          function makeKeys(){
+            var maxStep = (difficulty<=2)? 2 : (difficulty===3? 3 : (difficulty===4? 4 : 5));
+            var step = Math.floor(rng()*(maxStep*2+1)) - maxStep;
+            if(Math.abs(step)===0) step = (rng()<0.5? 1:-1);
 
-            const curIdx = SCALE.indexOf(last.n) + last.o*7;
-            let newIdx = curIdx + step;
-            let n = SCALE[(newIdx%7+7)%7];
-            let o = Math.floor(newIdx/7);
-            // 範囲に収める
-            ({n,o} = clampToRange(range, n, o));
+            var curIdx = SCALE.indexOf(last.n) + last.o*7;
+            var newIdx = curIdx + step;
+            var n = SCALE[(newIdx%7+7)%7];
+            var o = Math.floor(newIdx/7);
+            var clamped = clampToRange(range, n, o); n = clamped.n; o = clamped.o;
 
-            // 和音（上位レベル）
-            let chordSize = 0;
-            if(!tok.rest && difficulty>=3 && bias==='chords' || (!tok.rest && difficulty>=4 && rng()<0.25)){
-              chordSize = (difficulty>=5 && rng()<0.4)? 2 : 1; // 2→三和音, 1→二和音
+            var chordSize = 0;
+            if((!tok.rest && difficulty>=3 && bias==='chords') || (!tok.rest && difficulty>=4 && rng()<0.25)){
+              chordSize = (difficulty>=5 && rng()<0.4)? 2 : 1;
             }
-            const keys = [noteToString(n,o)];
-            if(chordSize>=1){ // 3度を重ねる
-              const i2 = (SCALE.indexOf(n)+2)%7; const o2 = o + Math.floor((SCALE.indexOf(n)+2)/7);
+            var keys = [noteToString(n,o)];
+            if(chordSize>=1){
+              var i2 = (SCALE.indexOf(n)+2)%7; var o2 = o + Math.floor((SCALE.indexOf(n)+2)/7);
               keys.push(noteToString(SCALE[i2], o2));
             }
-            if(chordSize>=2){ // さらに5度
-              const i3 = (SCALE.indexOf(n)+4)%7; const o3 = o + Math.floor((SCALE.indexOf(n)+4)/7);
+            if(chordSize>=2){
+              var i3 = (SCALE.indexOf(n)+4)%7; var o3 = o + Math.floor((SCALE.indexOf(n)+4)/7);
               keys.push(noteToString(SCALE[i3], o3));
             }
-            last = {n, o};
+            last = {n:n, o:o};
             return keys;
-          };
+          }
 
-          const dur = tok.dur + (tok.rest? 'r':'');
-          const keys = tok.rest? [(hand==='RH')? 'b/4':'d/3'] : makeKeys(); // 休符用のダミーキー
-          const note = new Vex.Flow.StaveNote({clef, keys, duration: dur});
-          // 付点
-          for(let d=0; d<tok.dots; d++) Vex.Flow.Dot.buildAndAttach([note], { all: true });
-          // 和音用に自動的にヘッドを塗り分けたりしない（デフォルトでOK）
+          var dur = tok.dur + (tok.rest? 'r':'');
+          var keys = tok.rest? ((hand==='RH')? ['b/4'] : ['d/3']) : makeKeys();
+          var note = new Vex.Flow.StaveNote({clef: clef, keys: keys, duration: dur});
+          for(var d=0; d<tok.dots; d++){ Vex.Flow.Dot.buildAndAttach([note], { all: true }); }
           notes.push(note);
           if(tok.dur==='8' && !tok.rest){ eighthGroup.push(note); }
           if(tok.dur!=='8' || tok.rest || idx===pat.length-1){
-            if(eighthGroup.length>=2){
-              beams.push(new Vex.Flow.Beam(eighthGroup));
-            }
+            if(eighthGroup.length>=2){ beams.push(new Vex.Flow.Beam(eighthGroup)); }
             eighthGroup = [];
           }
         });
-        measures.push({notes, beams});
+        measures.push({notes:notes, beams:beams});
       }
-      return {hand, clef, measures};
+      return {hand:hand, clef:clef, measures:measures};
     }
 
-    const useRH = (mode==='RH' || mode==='BOTH');
-    const useLH = (mode==='LH' || mode==='BOTH');
-    const RH = useRH? buildHand('RH') : null;
-    const LH = useLH? buildHand('LH') : null;
+    var useRH = (mode==='RH' || mode==='BOTH');
+    var useLH = (mode==='LH' || mode==='BOTH');
+    var RH = useRH? buildHand('RH') : null;
+    var LH = useLH? buildHand('LH') : null;
 
     function layoutAndDraw(handPart, stave){
-      const VF = Vex.Flow;
-      const voices = [];
-      handPart.measures.forEach((m, mi)=>{
-        const voice = new VF.Voice({num_beats:4, beat_value:4}).setMode(VF.Voice.Mode.SOFT);
-        voice.addTickables(m.notes);
-        voices.push(voice);
-      });
-      // 各小節ごとにフォーマッタで整形
-      let x = stave.getX() + 10;
-      const y = stave.getY();
-      const w = stave.getWidth();
-      const per = (w-20)/bars;
-      handPart.measures.forEach((notes, mi)=>{
-        const st = new VF.Stave(x, y, per);
+      var VF = Vex.Flow;
+      var x = stave.getX() + 10;
+      var y = stave.getY();
+      var w = stave.getWidth();
+      var per = (w-20)/bars;
+      handPart.measures.forEach(function(m, mi){
+        var st = new VF.Stave(x, y, per);
         st.setContext(context);
         st.setClef(handPart.clef);
         if(mi===0){ st.setTimeSignature('4/4'); }
         st.draw();
-        const voice = new VF.Voice({num_beats:4, beat_value:4}).setMode(VF.Voice.Mode.SOFT);
+        var voice = new VF.Voice({num_beats:4, beat_value:4}).setMode(VF.Voice.Mode.SOFT);
         voice.addTickables(m.notes);
         new VF.Formatter().joinVoices([voice]).format([voice], per-40);
-        voice.draw(context, st);\n        // ビームはフォーマッタ後に描画\n        m.beams.forEach(b=>{ b.setContext(context).draw(); });\n        x += per;
+        voice.draw(context, st);
+        m.beams.forEach(function(b){ b.setContext(context).draw(); });
+        x += per;
       });
     }
 
@@ -343,24 +337,22 @@
   }
 
   // ===== UI wiring =====
-  const $ = sel => document.querySelector(sel);
+  function $(sel){ return document.querySelector(sel); }
   function currentOptions(){
-    const mode = document.querySelector('input[name="mode"]:checked').value;
-    const difficulty = Number($('#difficulty').value);
-    const bars = Number(document.querySelector('input[name="bars"]:checked').value);
-    const seed = $('#seed').value.trim();
-    const bias = $('#rhythmSeed').value;
-    return {mode, difficulty, bars, seed: seed || null, bias};
+    var mode = document.querySelector('input[name="mode"]:checked').value;
+    var difficulty = Number($('#difficulty').value);
+    var bars = Number(document.querySelector('input[name="bars"]:checked').value);
+    var seed = $('#seed').value.trim();
+    var bias = $('#rhythmSeed').value;
+    return {mode:mode, difficulty:difficulty, bars:bars, seed: (seed || null), bias:bias};
   }
   function doGen(){ generatePhrase(currentOptions()); }
-  $('#generate').addEventListener('click', doGen);
-  // ショートカット
-  window.addEventListener('keydown', (e)=>{
-    if(e.key.toLowerCase()==='g'){ e.preventDefault(); doGen(); }
-    if(e.key>='1' && e.key<='5'){ $('#difficulty').value = e.key; doGen(); }
+  document.getElementById('generate').addEventListener('click', doGen);
+  window.addEventListener('keydown', function(e){
+    if((e.key||'').toLowerCase()==='g'){ e.preventDefault(); doGen(); }
+    if(e.key>='1' && e.key<='5'){ document.getElementById('difficulty').value = e.key; doGen(); }
   });
 
-  // 初回描画
   generatePhrase(currentOptions());
   </script>
 </body>
