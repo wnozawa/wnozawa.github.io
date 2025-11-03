@@ -116,18 +116,18 @@
       </div>
       <div class="row" style="margin-top:10px">
         <span class="hint">
-          鍵盤範囲：右手 C4〜G5／左手 C2〜G3（難易度で可変）。臨時記号なし（ハ長調）。いまは全部4分音符です。
+          鍵盤範囲：右手 C4〜G5／左手 C2〜G3（難易度で可変）。臨時記号なし（ハ長調）。現在は4分音符のみ。
         </span>
       </div>
     </section>
 
     <section id="score" class="card" aria-live="polite">
-      <!-- SVG score will be injected here -->
+      <!-- canvas をここに作ります -->
     </section>
 
     <section class="card footer">
       <div>
-        <span class="tiny">© GitHub Pages にそのまま置ける単一HTML。VexFlow 3（EasyScore）使用。</span>
+        <span class="tiny">© GitHub Pages にそのまま置ける単一HTML。外部ライブラリ不使用。</span>
       </div>
       <div class="tiny">
         ショートカット：<span class="kbd">G</span> で生成／
@@ -136,17 +136,14 @@
     </section>
   </main>
 
-  <!-- ★ VexFlow 本体：公式 README 推奨の unpkg リリース版 -->
-  <script src="https://unpkg.com/vexflow/releases/vexflow-min.js"></script>
-
-  <!-- ★ アプリ本体 -->
   <script>
   'use strict';
 
-  // ---- 簡易エラー表示 ----
+  // ---- 簡易エラー表示（画面下に出す） ----
   window.addEventListener('error', function(e){
     var div = document.getElementById('score');
     if(!div) return;
+    div.innerHTML = '';
     var pre = document.createElement('pre');
     pre.textContent = 'エラー: ' + (e.error && e.error.stack ? e.error.stack : (e.message || e));
     pre.style.color = '#ff9da4';
@@ -155,7 +152,6 @@
     pre.style.border = '1px solid #3a1a1a';
     pre.style.background = '#190f0f';
     pre.style.borderRadius = '8px';
-    div.innerHTML = '';
     div.appendChild(pre);
   });
 
@@ -170,7 +166,7 @@
   }
   function pick(rng, arr){ return arr[Math.floor(rng()*arr.length)]; }
 
-  // ---- 音域定義（Cメジャー） ----
+  // ---- 音階 & 音域定義 ----
   var SCALE = ['c','d','e','f','g','a','b'];
 
   var RH_RANGES = {
@@ -188,114 +184,191 @@
     5: {lo: {n:'f',o:1}, hi: {n:'d',o:4}}
   };
 
-  function rankOf(n,o){ return o*7 + SCALE.indexOf(n); }
-  function clampRankToRange(range, rank){
+  function rankOf(n,o){
+    return o * 7 + SCALE.indexOf(n);
+  }
+  function rankToNote(rank){
+    var o = Math.floor(rank / 7);
+    var idx = rank % 7;
+    return { name: SCALE[idx], octave: o };
+  }
+  function clampRank(range, rank){
     var lo = rankOf(range.lo.n, range.lo.o);
     var hi = rankOf(range.hi.n, range.hi.o);
     if(rank < lo) rank = lo;
     if(rank > hi) rank = hi;
     return rank;
   }
-  function rankToNote(range, rank){
-    rank = clampRankToRange(range, rank);
-    var o = Math.floor(rank / 7);
-    var idx = rank % 7;
-    var n = SCALE[idx];
-    return { n:n, o:o };
-  }
 
-  function randomNoteSequence(range, difficulty, bars, rng){
-    // 4分音符だけで、1小節あたり4音
+  // ---- メロディ生成（4分音符だけ） ----
+  function generateMelody(range, difficulty, bars, rng){
     var notesPerBar = 4;
-    var maxStep = (difficulty<=2)? 2 : (difficulty===3? 3 : (difficulty===4? 4 : 5));
+    var totalNotes = notesPerBar * bars;
+    var notes = [];
+
+    var maxStep = (difficulty <= 2) ? 2 :
+                  (difficulty === 3) ? 3 :
+                  (difficulty === 4) ? 4 : 5;
 
     var loRank = rankOf(range.lo.n, range.lo.o);
     var hiRank = rankOf(range.hi.n, range.hi.o);
-    var startRank = Math.floor((loRank + hiRank) / 2);
-    var lastRank = startRank;
+    var curRank = Math.round((loRank + hiRank) / 2);
 
-    var barsStrings = [];
-    for(var b=0; b<bars; b++){
-      var tokens = [];
-      for(var i=0; i<notesPerBar; i++){
-        var step = Math.floor(rng() * (maxStep*2 + 1)) - maxStep; // -max..+max
-        if(step === 0){ step = (rng()<0.5 ? 1 : -1); }
-        var nextRank = clampRankToRange(range, lastRank + step);
-        var note = rankToNote(range, nextRank);
-        lastRank = nextRank;
-        var pitch = note.n.toUpperCase() + note.o;  // 例: C4
-        tokens.push(pitch + '/q');
+    for(var i=0;i<totalNotes;i++){
+      var step = Math.floor(rng() * (maxStep*2 + 1)) - maxStep; // -max..+max
+      if(step === 0){
+        step = (rng() < 0.5) ? 1 : -1;
       }
-      barsStrings.push(tokens.join(', '));
+      curRank = clampRank(range, curRank + step);
+      var note = rankToNote(curRank);
+      notes.push(note);
     }
-    return barsStrings.join(' | ');
+    return notes;
   }
 
-  // ---- フレーズ生成（EasyScore + Factory） ----
+  // ---- 五線 & 音符描画 ----
+  var LINE_GAP = 10;      // 五線の線間
+  var STEP_HEIGHT = LINE_GAP / 2; // 音符の1度上下
+
+  function getNoteY(clef, name, octave, staffTop){
+    var rank = rankOf(name, octave);
+    var refRank, refY;
+
+    if(clef === 'treble'){
+      // ト音記号：B4（3本目）を基準
+      refRank = rankOf('b', 4);
+    }else{
+      // ヘ音記号：D3（3本目）を基準
+      refRank = rankOf('d', 3);
+    }
+    refY = staffTop + LINE_GAP * 2; // 3本目の線
+    var steps = rank - refRank;
+    return refY - steps * STEP_HEIGHT;
+  }
+
+  function drawStaff(ctx, staffTop, staffWidth, leftMargin, clef, bars){
+    var x0 = leftMargin;
+    var x1 = leftMargin + staffWidth;
+    ctx.strokeStyle = '#6c7a89';
+    ctx.lineWidth = 1;
+
+    // 五線
+    for(var i=0;i<5;i++){
+      var y = staffTop + i*LINE_GAP;
+      ctx.beginPath();
+      ctx.moveTo(x0, y);
+      ctx.lineTo(x1, y);
+      ctx.stroke();
+    }
+
+    // 小節線
+    for(var b=0;b<=bars;b++){
+      var bx = leftMargin + staffWidth * (b / bars);
+      ctx.beginPath();
+      ctx.moveTo(bx, staffTop);
+      ctx.lineTo(bx, staffTop + LINE_GAP*4);
+      ctx.stroke();
+    }
+
+    // 音部記号と拍子
+    ctx.fillStyle = '#eaf2ff';
+    ctx.font = '28px serif';
+    var clefChar = (clef === 'treble') ? '𝄞' : '𝄢';
+    ctx.fillText(clefChar, 20, staffTop + LINE_GAP*4 - 2);
+
+    ctx.font = '16px sans-serif';
+    ctx.fillText('4', 42, staffTop + LINE_GAP*1.7);
+    ctx.fillText('4', 42, staffTop + LINE_GAP*3.0);
+  }
+
+  function drawNotes(ctx, notes, clef, staffTop, staffWidth, leftMargin, bars){
+    var totalNotes = notes.length;
+    if(totalNotes === 0) return;
+    var spacing = staffWidth / (totalNotes + 1);
+
+    ctx.fillStyle = '#eaf2ff';
+    ctx.strokeStyle = '#eaf2ff';
+    ctx.lineWidth = 1.5;
+
+    for(var i=0;i<totalNotes;i++){
+      var x = leftMargin + spacing * (i+1);
+      var n = notes[i];
+      var y = getNoteY(clef, n.name, n.octave, staffTop);
+
+      // 音符の玉
+      ctx.beginPath();
+      ctx.ellipse(x, y, 6, 4, -0.4, 0, Math.PI*2);
+      ctx.fill();
+
+      // 棒（上向き）
+      ctx.beginPath();
+      ctx.moveTo(x + 6, y);
+      ctx.lineTo(x + 6, y - 28);
+      ctx.stroke();
+    }
+  }
+
+  // ---- フレーズ生成全体 ----
   function generatePhrase(opts){
     var mode = opts.mode;
     var difficulty = opts.difficulty;
     var bars = opts.bars;
     var seed = opts.seed;
-    var rng = seed ? mulberry32(Number(seed)>>>0) : Math.random;
+    var rng = seed ? mulberry32(Number(seed)>>>0) : function(){ return Math.random(); };
 
-    var VF = Vex.Flow;
-    // いったん score 要素の中身をクリア
-    var div = document.getElementById('score');
-    div.innerHTML = '';
+    var scoreDiv = document.getElementById('score');
+    scoreDiv.innerHTML = '';
 
-    var width = 140 + bars * 120;
-    var height = (mode === 'BOTH') ? 220 : 140;
+    var canvas = document.createElement('canvas');
+    canvas.id = 'scoreCanvas';
+    var width = Math.max(600, scoreDiv.clientWidth - 40);
+    var height = (mode === 'BOTH') ? 260 : 160;
+    canvas.width = width;
+    canvas.height = height;
+    scoreDiv.appendChild(canvas);
 
-    var factory = new VF.Factory({
-      renderer: { elementId: 'score', width: width, height: height }
-    });
+    var ctx = canvas.getContext('2d');
+    ctx.clearRect(0,0,width,height);
 
-    var score = factory.EasyScore();
-    var system = factory.System();
+    var leftMargin = 70;
+    var staffWidth = width - leftMargin - 20;
 
     if(mode === 'RH'){
+      var staffTop = 40;
+      drawStaff(ctx, staffTop, staffWidth, leftMargin, 'treble', bars);
       var rhRange = RH_RANGES[difficulty];
-      var rhStr = randomNoteSequence(rhRange, difficulty, bars, rng);
-      var rhVoice = score.voice(score.notes(rhStr), { time: '4/4' });
+      var rhNotes = generateMelody(rhRange, difficulty, bars, rng);
+      drawNotes(ctx, rhNotes, 'treble', staffTop, staffWidth, leftMargin, bars);
 
-      system.addStave({
-        voices: [ rhVoice ]
-      }).addClef('treble').addTimeSignature('4/4');
-
-    } else if(mode === 'LH'){
+    }else if(mode === 'LH'){
+      var staffTop2 = 40;
+      drawStaff(ctx, staffTop2, staffWidth, leftMargin, 'bass', bars);
       var lhRange = LH_RANGES[difficulty];
-      var lhStr = randomNoteSequence(lhRange, difficulty, bars, rng);
-      var lhVoice = score.voice(score.notes(lhStr), { time: '4/4' });
+      var lhNotes = generateMelody(lhRange, difficulty, bars, rng);
+      drawNotes(ctx, lhNotes, 'bass', staffTop2, staffWidth, leftMargin, bars);
 
-      system.addStave({
-        voices: [ lhVoice ]
-      }).addClef('bass').addTimeSignature('4/4');
+    }else if(mode === 'BOTH'){
+      var trebleTop = 30;
+      var bassTop = 140;
 
-    } else if(mode === 'BOTH'){
+      drawStaff(ctx, trebleTop, staffWidth, leftMargin, 'treble', bars);
+      drawStaff(ctx, bassTop, staffWidth, leftMargin, 'bass', bars);
+
       var rhRange2 = RH_RANGES[difficulty];
       var lhRange2 = LH_RANGES[difficulty];
-      var rhStr2 = randomNoteSequence(rhRange2, difficulty, bars, rng);
-      var lhStr2 = randomNoteSequence(lhRange2, difficulty, bars, rng);
+      var rhNotes2 = generateMelody(rhRange2, difficulty, bars, rng);
+      var lhNotes2 = generateMelody(lhRange2, difficulty, bars, rng);
 
-      var rhVoice2 = score.voice(score.notes(rhStr2), { time: '4/4' });
-      var lhVoice2 = score.voice(score.notes(lhStr2), { time: '4/4' });
+      drawNotes(ctx, rhNotes2, 'treble', trebleTop, staffWidth, leftMargin, bars);
+      drawNotes(ctx, lhNotes2, 'bass', bassTop, staffWidth, leftMargin, bars);
 
-      system.addStave({
-        voices: [ rhVoice2 ]
-      }).addClef('treble').addTimeSignature('4/4');
-
-      system.addStave({
-        voices: [ lhVoice2 ]
-      }).addClef('bass').addTimeSignature('4/4');
-      // （大括弧などのコネクタは省略：まずは表示優先）
+      // （大括弧は省略：まずは音符表示を優先）
     }
-
-    factory.draw();
   }
 
   // ---- UI wiring ----
   function $(sel){ return document.querySelector(sel); }
+
   function currentOptions(){
     var mode = document.querySelector('input[name="mode"]:checked').value;
     var difficulty = Number($('#difficulty').value);
@@ -304,12 +377,17 @@
     var bias = $('#rhythmSeed').value; // いまは未使用
     return { mode: mode, difficulty: difficulty, bars: bars, seed: (seed || null), bias: bias };
   }
+
   function doGen(){ generatePhrase(currentOptions()); }
 
   document.getElementById('generate').addEventListener('click', doGen);
   window.addEventListener('keydown', function(e){
-    if((e.key||'').toLowerCase()==='g'){ e.preventDefault(); doGen(); }
-    if(e.key>='1' && e.key<='5'){
+    var k = (e.key || '').toLowerCase();
+    if(k === 'g'){
+      e.preventDefault();
+      doGen();
+    }
+    if(e.key >= '1' && e.key <= '5'){
       document.getElementById('difficulty').value = e.key;
       doGen();
     }
