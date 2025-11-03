@@ -247,8 +247,7 @@
 
       for(let m=0;m<bars;m++){
         const pat = pick(rng, patterns);
-        const notes = [];
-        let eighthGroup = [];
+        const notes = [];\n        const beams = [];\n        let eighthGroup = [];
 
         pat.forEach((tok, idx)=>{
           const makeKeys = ()=>{
@@ -292,12 +291,12 @@
           if(tok.dur==='8' && !tok.rest){ eighthGroup.push(note); }
           if(tok.dur!=='8' || tok.rest || idx===pat.length-1){
             if(eighthGroup.length>=2){
-              new Vex.Flow.Beam(eighthGroup).setContext(context).draw();
+              beams.push(new Vex.Flow.Beam(eighthGroup));
             }
             eighthGroup = [];
           }
         });
-        measures.push(notes);
+        measures.push({notes, beams});
       }
       return {hand, clef, measures};
     }
@@ -310,9 +309,9 @@
     function layoutAndDraw(handPart, stave){
       const VF = Vex.Flow;
       const voices = [];
-      handPart.measures.forEach((notes, mi)=>{
+      handPart.measures.forEach((m, mi)=>{
         const voice = new VF.Voice({num_beats:4, beat_value:4}).setMode(VF.Voice.Mode.SOFT);
-        voice.addTickables(notes);
+        voice.addTickables(m.notes);
         voices.push(voice);
       });
       // 各小節ごとにフォーマッタで整形
@@ -327,10 +326,9 @@
         if(mi===0){ st.setTimeSignature('4/4'); }
         st.draw();
         const voice = new VF.Voice({num_beats:4, beat_value:4}).setMode(VF.Voice.Mode.SOFT);
-        voice.addTickables(notes);
+        voice.addTickables(m.notes);
         new VF.Formatter().joinVoices([voice]).format([voice], per-40);
-        voice.draw(context, st);
-        x += per;
+        voice.draw(context, st);\n        // ビームはフォーマッタ後に描画\n        m.beams.forEach(b=>{ b.setContext(context).draw(); });\n        x += per;
       });
     }
 
