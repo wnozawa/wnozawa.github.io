@@ -43,7 +43,7 @@
     .row{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
     #score{
       overflow:auto;background:#0d141b;border:1px dashed #223142;
-      border-radius:12px;padding:12px;min-height:120px
+      border-radius:12px;padding:12px;min-height:140px
     }
     .footer{
       display:flex;justify-content:space-between;align-items:center;
@@ -74,3 +74,249 @@
           <div class="seg" role="radiogroup" aria-label="手のモード">
             <input type="radio" name="mode" id="mode-rh" value="RH" checked>
             <label for="mode-rh">右手</label>
+            <input type="radio" name="mode" id="mode-lh" value="LH">
+            <label for="mode-lh">左手</label>
+            <input type="radio" name="mode" id="mode-both" value="BOTH">
+            <label for="mode-both">両手</label>
+          </div>
+        </div>
+        <div class="field">
+          <label>難易度（1やさしい → 5ややむずかしい）</label>
+          <select id="difficulty" aria-label="難易度">
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3" selected>3</option>
+            <option value="4">4</option>
+            <option value="5">5</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>小節数</label>
+          <div class="seg" role="radiogroup" aria-label="小節数">
+            <input type="radio" name="bars" id="bars-1" value="1" checked>
+            <label for="bars-1">1</label>
+            <input type="radio" name="bars" id="bars-2" value="2">
+            <label for="bars-2">2</label>
+          </div>
+        </div>
+        <div class="field">
+          <label>リズムのバリエーション（※いまは4分音符のみ）</label>
+          <select id="rhythmSeed" aria-label="リズムのバリエーション">
+            <option value="auto" selected>おまかせ</option>
+            <option value="quarters">4分音符のみ</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>再現シード（任意）</label>
+          <input type="number" id="seed" placeholder="例: 12345" class="mono" />
+        </div>
+        <div class="field">
+          <button id="generate" class="primary">ランダム生成</button>
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <span class="hint">
+          鍵盤範囲：右手 C4〜G5／左手 C2〜G3（難易度で可変）。臨時記号なし（ハ長調）。いまは全部4分音符です。
+        </span>
+      </div>
+    </section>
+
+    <section id="score" class="card" aria-live="polite">
+      <!-- SVG score will be injected here -->
+    </section>
+
+    <section class="card footer">
+      <div>
+        <span class="tiny">© GitHub Pages にそのまま置ける単一HTML。VexFlow 3（EasyScore）使用。</span>
+      </div>
+      <div class="tiny">
+        ショートカット：<span class="kbd">G</span> で生成／
+        <span class="kbd">1–5</span> で難易度
+      </div>
+    </section>
+  </main>
+
+  <!-- ★ VexFlow 本体：公式 README 推奨の unpkg リリース版 -->
+  <script src="https://unpkg.com/vexflow/releases/vexflow-min.js"></script>
+
+  <!-- ★ アプリ本体 -->
+  <script>
+  'use strict';
+
+  // ---- 簡易エラー表示 ----
+  window.addEventListener('error', function(e){
+    var div = document.getElementById('score');
+    if(!div) return;
+    var pre = document.createElement('pre');
+    pre.textContent = 'エラー: ' + (e.error && e.error.stack ? e.error.stack : (e.message || e));
+    pre.style.color = '#ff9da4';
+    pre.style.whiteSpace = 'pre-wrap';
+    pre.style.padding = '8px';
+    pre.style.border = '1px solid #3a1a1a';
+    pre.style.background = '#190f0f';
+    pre.style.borderRadius = '8px';
+    div.innerHTML = '';
+    div.appendChild(pre);
+  });
+
+  // ---- RNG（シード付き） ----
+  function mulberry32(a){
+    return function(){
+      var t=a+=0x6D2B79F5;
+      t=Math.imul(t^t>>>15,t|1);
+      t^=t+Math.imul(t^t>>>7,t|61);
+      return ((t^t>>>14)>>>0)/4294967296;
+    };
+  }
+  function pick(rng, arr){ return arr[Math.floor(rng()*arr.length)]; }
+
+  // ---- 音域定義（Cメジャー） ----
+  var SCALE = ['c','d','e','f','g','a','b'];
+
+  var RH_RANGES = {
+    1: {lo: {n:'c',o:4}, hi: {n:'g',o:5}},
+    2: {lo: {n:'c',o:4}, hi: {n:'a',o:5}},
+    3: {lo: {n:'b',o:3}, hi: {n:'b',o:5}},
+    4: {lo: {n:'a',o:3}, hi: {n:'c',o:6}},
+    5: {lo: {n:'g',o:3}, hi: {n:'d',o:6}}
+  };
+  var LH_RANGES = {
+    1: {lo: {n:'c',o:2}, hi: {n:'g',o:3}},
+    2: {lo: {n:'b',o:1}, hi: {n:'a',o:3}},
+    3: {lo: {n:'a',o:1}, hi: {n:'b',o:3}},
+    4: {lo: {n:'g',o:1}, hi: {n:'c',o:4}},
+    5: {lo: {n:'f',o:1}, hi: {n:'d',o:4}}
+  };
+
+  function rankOf(n,o){ return o*7 + SCALE.indexOf(n); }
+  function clampRankToRange(range, rank){
+    var lo = rankOf(range.lo.n, range.lo.o);
+    var hi = rankOf(range.hi.n, range.hi.o);
+    if(rank < lo) rank = lo;
+    if(rank > hi) rank = hi;
+    return rank;
+  }
+  function rankToNote(range, rank){
+    rank = clampRankToRange(range, rank);
+    var o = Math.floor(rank / 7);
+    var idx = rank % 7;
+    var n = SCALE[idx];
+    return { n:n, o:o };
+  }
+
+  function randomNoteSequence(range, difficulty, bars, rng){
+    // 4分音符だけで、1小節あたり4音
+    var notesPerBar = 4;
+    var maxStep = (difficulty<=2)? 2 : (difficulty===3? 3 : (difficulty===4? 4 : 5));
+
+    var loRank = rankOf(range.lo.n, range.lo.o);
+    var hiRank = rankOf(range.hi.n, range.hi.o);
+    var startRank = Math.floor((loRank + hiRank) / 2);
+    var lastRank = startRank;
+
+    var barsStrings = [];
+    for(var b=0; b<bars; b++){
+      var tokens = [];
+      for(var i=0; i<notesPerBar; i++){
+        var step = Math.floor(rng() * (maxStep*2 + 1)) - maxStep; // -max..+max
+        if(step === 0){ step = (rng()<0.5 ? 1 : -1); }
+        var nextRank = clampRankToRange(range, lastRank + step);
+        var note = rankToNote(range, nextRank);
+        lastRank = nextRank;
+        var pitch = note.n.toUpperCase() + note.o;  // 例: C4
+        tokens.push(pitch + '/q');
+      }
+      barsStrings.push(tokens.join(', '));
+    }
+    return barsStrings.join(' | ');
+  }
+
+  // ---- フレーズ生成（EasyScore + Factory） ----
+  function generatePhrase(opts){
+    var mode = opts.mode;
+    var difficulty = opts.difficulty;
+    var bars = opts.bars;
+    var seed = opts.seed;
+    var rng = seed ? mulberry32(Number(seed)>>>0) : Math.random;
+
+    var VF = Vex.Flow;
+    // いったん score 要素の中身をクリア
+    var div = document.getElementById('score');
+    div.innerHTML = '';
+
+    var width = 140 + bars * 120;
+    var height = (mode === 'BOTH') ? 220 : 140;
+
+    var factory = new VF.Factory({
+      renderer: { elementId: 'score', width: width, height: height }
+    });
+
+    var score = factory.EasyScore();
+    var system = factory.System();
+
+    if(mode === 'RH'){
+      var rhRange = RH_RANGES[difficulty];
+      var rhStr = randomNoteSequence(rhRange, difficulty, bars, rng);
+      var rhVoice = score.voice(score.notes(rhStr), { time: '4/4' });
+
+      system.addStave({
+        voices: [ rhVoice ]
+      }).addClef('treble').addTimeSignature('4/4');
+
+    } else if(mode === 'LH'){
+      var lhRange = LH_RANGES[difficulty];
+      var lhStr = randomNoteSequence(lhRange, difficulty, bars, rng);
+      var lhVoice = score.voice(score.notes(lhStr), { time: '4/4' });
+
+      system.addStave({
+        voices: [ lhVoice ]
+      }).addClef('bass').addTimeSignature('4/4');
+
+    } else if(mode === 'BOTH'){
+      var rhRange2 = RH_RANGES[difficulty];
+      var lhRange2 = LH_RANGES[difficulty];
+      var rhStr2 = randomNoteSequence(rhRange2, difficulty, bars, rng);
+      var lhStr2 = randomNoteSequence(lhRange2, difficulty, bars, rng);
+
+      var rhVoice2 = score.voice(score.notes(rhStr2), { time: '4/4' });
+      var lhVoice2 = score.voice(score.notes(lhStr2), { time: '4/4' });
+
+      system.addStave({
+        voices: [ rhVoice2 ]
+      }).addClef('treble').addTimeSignature('4/4');
+
+      system.addStave({
+        voices: [ lhVoice2 ]
+      }).addClef('bass').addTimeSignature('4/4');
+      // （大括弧などのコネクタは省略：まずは表示優先）
+    }
+
+    factory.draw();
+  }
+
+  // ---- UI wiring ----
+  function $(sel){ return document.querySelector(sel); }
+  function currentOptions(){
+    var mode = document.querySelector('input[name="mode"]:checked').value;
+    var difficulty = Number($('#difficulty').value);
+    var bars = Number(document.querySelector('input[name="bars"]:checked').value);
+    var seed = $('#seed').value.trim();
+    var bias = $('#rhythmSeed').value; // いまは未使用
+    return { mode: mode, difficulty: difficulty, bars: bars, seed: (seed || null), bias: bias };
+  }
+  function doGen(){ generatePhrase(currentOptions()); }
+
+  document.getElementById('generate').addEventListener('click', doGen);
+  window.addEventListener('keydown', function(e){
+    if((e.key||'').toLowerCase()==='g'){ e.preventDefault(); doGen(); }
+    if(e.key>='1' && e.key<='5'){
+      document.getElementById('difficulty').value = e.key;
+      doGen();
+    }
+  });
+
+  // 初回描画
+  generatePhrase(currentOptions());
+  </script>
+</body>
+</html>
